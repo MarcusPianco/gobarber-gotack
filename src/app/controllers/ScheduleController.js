@@ -1,6 +1,6 @@
 import { startOfDay, endOfDay, parseISO } from 'date-fns';
 import { Op } from 'sequelize';
-import Appointments from '../models/Appointments';
+import Appointment from '../models/Appointment';
 import User from '../models/User';
 
 class ScheduleController {
@@ -16,7 +16,7 @@ class ScheduleController {
     const { date } = req.query;
     const parserDate = parseISO(date);
 
-    const appointments = await Appointments.findAll({
+    const appointments = await Appointment.findAll({
       // pegar a primeira hora do dia at´´a hora setada aqui
       where: {
         provider_id: req.userId,

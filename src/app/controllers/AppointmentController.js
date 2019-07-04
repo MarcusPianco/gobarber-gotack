@@ -1,14 +1,17 @@
 import * as Yup from 'yup';
-import { startOfHour, parseISO, isBefore } from 'date-fns';
-import Appointments from '../models/Appointments';
+import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
+import pt from 'date-fns/locale/pt';
+import Appointment from '../models/Appointment';
 import User from '../models/User';
 import File from '../models/File';
+import Notification from '../schemas/Notification';
+import Mail from '../../lib/Mail';
 
 class AppointmentController {
   async index(req, res) {
     const { page = 1 } = req.query;
 
-    const appointments = await Appointments.findAll({
+    const appointments = await Appointment.findAll({
       where: { user_id: req.userId, canceled_at: null },
       order: ['date'],
       limit: 20,
@@ -56,7 +59,7 @@ class AppointmentController {
     if (!isProvider) {
       return res
         .status(401)
-        .json({ error: 'You can create appointments with providers' });
+        .json({ error: 'You can create Appointment with providers' });
     }
 
     // pega apenas a hora sem minutos e segundos  start
@@ -66,20 +69,71 @@ class AppointmentController {
       return res.status(400).json({ error: 'Past dates are not permited' });
     }
 
-    const appointmentsExist = await Appointments.findOne({
+    const AppointmentExist = await Appointment.findOne({
       where: { date: hourStart, provider_id, canceled_at: null },
     });
 
-    if (appointmentsExist) {
+    if (AppointmentExist) {
       return res.status(401).json({
         error: 'Appointment date is not  Avalible',
       });
     }
 
-    const appointment = await Appointments.create({
+    const appointment = await Appointment.create({
       user_id: req.userId,
       provider_id,
       date,
+    });
+
+    /**
+     * Notify Appointment Provider
+     */
+
+    const formatDate = format(hourStart, "'dia' dd 'de' MMMM 'às' H:mm'h'", {
+      locale: pt,
+    });
+
+    const user = await User.findByPk(req.userId);
+
+    await Notification.create({
+      content: `Novo agendamento de ${user.name} ${formatDate}`,
+      user: provider_id,
+    });
+
+    return res.json(appointment);
+  }
+
+  async delete(req, res) {
+    const appointment = await Appointment.findByPk(req.params.id, {
+      include: {
+        model: User,
+        as: 'provider',
+        attributes: ['name', 'email'],
+      },
+    });
+
+    if (appointment.user_id !== req.userId) {
+      return res.status(401).json({
+        error: "You don't have permission to cancel this appointment",
+      });
+    }
+    // horário limite para cancelar
+    const dateWithSub = subHours(appointment.date, 2);
+
+    if (isBefore(dateWithSub, new Date())) {
+      return res.status(401).json({
+        error: 'You can only cancel Appointment 2 hours in advance.',
+      });
+    }
+
+    appointment.canceled_at = new Date();
+
+    await appointment.save();
+
+    await Mail.sendMail({
+      to: `${appointment.provider.name} <${appointment.provider.email}>`,
+      subject: 'Agendamento Cancelado',
+      text: 'Você tem um novo cancelamento',
     });
 
     return res.json(appointment);
